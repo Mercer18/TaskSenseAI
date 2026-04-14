@@ -2,8 +2,7 @@ import sqlite3
 from datetime import datetime
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from database.db_manager import get_connection
+from tasksenseai.database.db_manager import get_connection
 
 def log_behavior(task_id, delay_minutes, ignored_reminders, completion_time_minutes):
     conn = get_connection()

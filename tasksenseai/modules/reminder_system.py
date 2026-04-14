@@ -1,12 +1,13 @@
-import sys
-import os
+# -*- coding: utf-8 -*-
+import logging
 import threading
 import time
 from datetime import datetime, timedelta
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from modules.task_manager import get_pending_tasks
-from modules.ai_engine import predict_risk, save_prediction
-from modules.behavior_tracker import get_user_risk_features
+from tasksenseai.modules.task_manager import get_pending_tasks
+from tasksenseai.modules.ai_engine import predict_risk, save_prediction
+from tasksenseai.modules.behavior_tracker import get_user_risk_features
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 try:
     from plyer import notification
@@ -41,9 +42,9 @@ def send_notification(risk_level, task_title):
                 timeout=8
             )
         except Exception as e:
-            print(f"Notification error: {e}")
+            logging.info(f"Notification error: {e}")
     else:
-        print(f"[{msg['title']}] {task_title} —> {msg['message']}")
+        logging.info(f"[{msg['title']}] {task_title} —> {msg['message']}")
 
 # Track last reminder time per task
 _last_reminded = {}
@@ -57,7 +58,7 @@ def check_and_remind():
             continue
         try:
             due = datetime.fromisoformat(task['due_date'])
-            time_diff = (due - now).total_seconds() / 60
+            time_diff = (due - now).total_seconds() / 60  # minutes until due (negative = overdue)
 
             # Pull REAL existing behavior — don't log fake entries
             features = get_user_risk_features(task['id'])
@@ -72,22 +73,27 @@ def check_and_remind():
 
             is_overdue = time_diff < 0
 
+            # Determine per-task reminder interval (in minutes)
             if is_overdue:
                 if risk == 'High':
-                    interval = 1        # every 1 min
+                    interval = 1
                 elif risk == 'Medium':
-                    interval = 2        # every 2 mins
+                    interval = 2
                 else:
-                    interval = 5        # every 5 mins
+                    interval = 5
             else:
-                if risk == 'High' and time_diff <= 30:
-                    interval = 2        # every 2 mins
-                elif risk == 'Medium' and time_diff <= 45:
-                    interval = 3        # every 3 mins
+                # Widen the window: remind for tasks due within a few hours
+                if risk == 'High' and time_diff <= 180:
+                    interval = 2
+                elif risk == 'Medium' and time_diff <= 120:
+                    interval = 5
                 elif risk == 'Low' and time_diff <= 60:
-                    interval = 5        # every 5 mins
+                    interval = 10
+                elif time_diff <= 30:
+                    # Any risk, if due within 30 minutes, remind
+                    interval = 5
                 else:
-                    continue            # not close enough yet, skip
+                    continue  # not close enough yet, skip
 
             task_id = task['id']
             last_time = _last_reminded.get(task_id)
@@ -96,10 +102,10 @@ def check_and_remind():
             if last_time is None or (now_ts - last_time).total_seconds() / 60 >= interval:
                 send_notification(risk, task['title'])
                 _last_reminded[task_id] = now_ts
-                print(f"Reminder sent for '{task['title']}' — Risk: {risk} — Interval: {interval}min")
+                logging.info(f"Reminder sent for '{task['title']}' — Risk: {risk} — Due in: {time_diff:.0f}min — Interval: {interval}min")
 
         except Exception as e:
-            print(f"Reminder check error for task {task['id']}: {e}")
+            logging.warning(f"Reminder check error for task {task['id']}: {e}")
 
 
 def start_reminder_daemon():
@@ -108,9 +114,14 @@ def start_reminder_daemon():
             try:
                 check_and_remind()
             except Exception as e:
-                print(f"Reminder daemon error: {e}")
-            time.sleep(30)      # wake up every 30 seconds
+                logging.warning(f"Reminder daemon error: {e}")
+
+            # The daemon ticks every 30 seconds so it can actually honour
+            # the fine-grained per-task intervals (1-5 min).  The user-facing
+            # "check_interval" setting is no longer used for the loop sleep;
+            # it was causing a 5-minute gap that swallowed all reminders.
+            time.sleep(30)
 
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
-    print("Reminder daemon started.")
+    logging.info("Reminder daemon started (30s tick).")

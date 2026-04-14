@@ -2,8 +2,7 @@ import sqlite3
 from datetime import datetime
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from database.db_manager import get_connection
+from tasksenseai.database.db_manager import get_connection
 
 def add_task(title, description, due_date, priority):
     conn = get_connection()
@@ -20,7 +19,7 @@ def add_task(title, description, due_date, priority):
 def get_all_tasks():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM tasks ORDER BY created_at DESC')
+    cursor.execute('SELECT * FROM tasks WHERE is_deleted = 0 ORDER BY created_at DESC')
     tasks = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return tasks
@@ -28,7 +27,7 @@ def get_all_tasks():
 def get_task_by_id(task_id):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM tasks WHERE id = ?', (task_id,))
+    cursor.execute('SELECT * FROM tasks WHERE id = ? AND is_deleted = 0', (task_id,))
     task = cursor.fetchone()
     conn.close()
     return dict(task) if task else None
@@ -43,19 +42,29 @@ def update_task_status(task_id, status):
     conn.commit()
     conn.close()
 
+def update_task(task_id, title, description, due_date, priority, status):
+    conn = get_connection()
+    cursor = conn.cursor()
+    completed_at = datetime.now().isoformat() if status == 'Completed' else None
+    cursor.execute('''
+        UPDATE tasks 
+        SET title = ?, description = ?, due_date = ?, priority = ?, status = ?, completed_at = ?
+        WHERE id = ?
+    ''', (title, description, due_date, priority, status, completed_at, task_id))
+    conn.commit()
+    conn.close()
+
 def delete_task(task_id):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('DELETE FROM behavior_logs WHERE task_id = ?', (task_id,))
-    cursor.execute('DELETE FROM predictions WHERE task_id = ?', (task_id,))
-    cursor.execute('DELETE FROM tasks WHERE id = ?', (task_id,))
+    cursor.execute('UPDATE tasks SET is_deleted = 1 WHERE id = ?', (task_id,))
     conn.commit()
     conn.close()
 
 def get_pending_tasks():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM tasks WHERE status = 'Pending' ORDER BY due_date ASC")
+    cursor.execute("SELECT * FROM tasks WHERE status IN ('Pending', 'In Progress') AND is_deleted = 0 ORDER BY due_date ASC")
     tasks = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return tasks
@@ -63,11 +72,11 @@ def get_pending_tasks():
 def get_task_stats():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) as total FROM tasks")
+    cursor.execute("SELECT COUNT(*) as total FROM tasks WHERE is_deleted = 0")
     total = cursor.fetchone()['total']
-    cursor.execute("SELECT COUNT(*) as completed FROM tasks WHERE status = 'Completed'")
+    cursor.execute("SELECT COUNT(*) as completed FROM tasks WHERE status = 'Completed' AND is_deleted = 0")
     completed = cursor.fetchone()['completed']
-    cursor.execute("SELECT COUNT(*) as pending FROM tasks WHERE status = 'Pending'")
+    cursor.execute("SELECT COUNT(*) as pending FROM tasks WHERE status IN ('Pending', 'In Progress') AND is_deleted = 0")
     pending = cursor.fetchone()['pending']
     conn.close()
     return {'total': total, 'completed': completed, 'pending': pending}
