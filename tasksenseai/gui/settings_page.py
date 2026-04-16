@@ -151,10 +151,12 @@ class SettingsPage(QWidget):
         outer.addWidget(scroll)
 
     def retrain_model(self):
-        reply = QMessageBox.question(
-            self, 'Retrain Model', 'This will retrain the AI model. Continue?',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Question)
+        msg.setWindowTitle('Retrain Model')
+        msg.setText('This will retrain the AI model. Continue?')
+        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if msg.exec() == int(QMessageBox.StandardButton.Yes):
             self.retrain_btn.setEnabled(False)
             self.retrain_btn.setText("🔄  Retraining… Please wait")
             self.thread = RetrainThread()
@@ -165,9 +167,17 @@ class SettingsPage(QWidget):
     def _on_done(self, model, acc):
         self.retrain_btn.setEnabled(True)
         self.retrain_btn.setText("🔄  Retrain AI Model")
-        QMessageBox.information(self, 'Done', f'Model retrained! Accuracy: {acc:.2%}')
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle('Done')
+        msg.setText(f'Model retrained! Accuracy: {acc:.2%}')
+        msg.exec()
 
     def _on_err(self, err):
         self.retrain_btn.setEnabled(True)
         self.retrain_btn.setText("🔄  Retrain AI Model")
-        QMessageBox.critical(self, 'Error', f'Failed to retrain model:\n{err}')
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle('Error')
+        msg.setText(f'Failed to retrain model:\n{err}')
+        msg.exec()

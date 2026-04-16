@@ -3,7 +3,7 @@ import logging
 import threading
 import time
 from datetime import datetime, timedelta
-from tasksenseai.modules.task_manager import get_pending_tasks
+from tasksenseai.modules.task_manager import get_pending_tasks, increment_reminder_count
 from tasksenseai.modules.ai_engine import predict_risk, save_prediction
 from tasksenseai.modules.behavior_tracker import get_user_risk_features
 
@@ -101,6 +101,7 @@ def check_and_remind():
 
             if last_time is None or (now_ts - last_time).total_seconds() / 60 >= interval:
                 send_notification(risk, task['title'])
+                increment_reminder_count(task_id)
                 _last_reminded[task_id] = now_ts
                 logging.info(f"Reminder sent for '{task['title']}' — Risk: {risk} — Due in: {time_diff:.0f}min — Interval: {interval}min")
 

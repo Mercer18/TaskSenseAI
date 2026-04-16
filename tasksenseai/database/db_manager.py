@@ -36,6 +36,7 @@ def initialize_database():
             status TEXT DEFAULT 'Pending',
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             completed_at TEXT,
+            reminders_sent INTEGER DEFAULT 0,
             current_risk TEXT DEFAULT 'N/A',
             is_deleted INTEGER DEFAULT 0
         )
@@ -48,6 +49,10 @@ def initialize_database():
         cursor.execute("ALTER TABLE tasks ADD COLUMN current_risk TEXT DEFAULT 'N/A'")
     if 'is_deleted' not in columns:
         cursor.execute("ALTER TABLE tasks ADD COLUMN is_deleted INTEGER DEFAULT 0")
+    if 'completed_at' not in columns:
+        cursor.execute("ALTER TABLE tasks ADD COLUMN completed_at TEXT")
+    if 'reminders_sent' not in columns:
+        cursor.execute("ALTER TABLE tasks ADD COLUMN reminders_sent INTEGER DEFAULT 0")
 
     # Behavior logs table
     cursor.execute('''

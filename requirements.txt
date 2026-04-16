@@ -4,3 +4,4 @@ scikit-learn==1.6.0
 matplotlib==3.10.0
 numpy==2.2.0
 plyer==2.1.0
+pillow==11.0.0

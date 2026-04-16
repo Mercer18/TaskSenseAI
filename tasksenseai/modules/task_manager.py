@@ -80,3 +80,11 @@ def get_task_stats():
     pending = cursor.fetchone()['pending']
     conn.close()
     return {'total': total, 'completed': completed, 'pending': pending}
+
+def increment_reminder_count(task_id):
+    """Increment reminders_sent counter each time a reminder fires."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE tasks SET reminders_sent = COALESCE(reminders_sent, 0) + 1 WHERE id = ?', (task_id,))
+    conn.commit()
+    conn.close()

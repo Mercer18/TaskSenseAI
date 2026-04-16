@@ -3,7 +3,7 @@ from datetime import datetime
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit,
-    QTextEdit, QComboBox, QDateTimeEdit, QTableWidget, QTableWidgetItem,
+    QTextEdit, QComboBox, QDateTimeEdit, QDateEdit, QTimeEdit, QTableWidget, QTableWidgetItem,
     QHeaderView, QMessageBox, QDialog, QFrame, QGraphicsDropShadowEffect
 )
 from PyQt6.QtCore import Qt, QDateTime
@@ -28,7 +28,7 @@ class TaskDialog(QDialog):
         self.setMinimumWidth(480)
         self.setStyleSheet("""
             QDialog { background-color: #1e1e2e; }
-            QLabel  { color: #cdd6f4; font-size: 12px; }
+            QLabel  { color: #cdd6f4; font-size: 12px; background: transparent; border: none; }
         """)
         self.init_ui()
 
@@ -38,7 +38,7 @@ class TaskDialog(QDialog):
         layout.setContentsMargins(24, 24, 24, 24)
 
         # Title
-        header_text = "✏️  Edit Task" if self.task else "✨  Create New Task"
+        header_text = "Edit Task" if self.task else "Create New Task"
         header = QLabel(header_text)
         header.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
         header.setStyleSheet("color: #cba6f7; margin-bottom: 6px;")
@@ -61,22 +61,68 @@ class TaskDialog(QDialog):
             self.desc_input.setText(self.task['description'])
         layout.addWidget(self.desc_input)
 
-        # Due date
+        # Due date and Time (Split)
         layout.addWidget(QLabel("Due Date & Time"))
-        self.due_date = QDateTimeEdit()
+        datetime_row = QHBoxLayout()
+        datetime_row.setSpacing(12)
+
+        self.due_date = QDateEdit()
+        
+        # Determine initial values
+        dt = QDateTime.currentDateTime()
         if self.task and self.task.get('due_date'):
             try:
-                dt = QDateTime.fromString(self.task['due_date'], Qt.DateFormat.ISODate)
-                if not dt.isValid():
-                    dt = QDateTime.fromString(self.task['due_date'], "yyyy-MM-dd HH:mm")
-                self.due_date.setDateTime(dt if dt.isValid() else QDateTime.currentDateTime())
+                parsed_dt = QDateTime.fromString(self.task['due_date'], Qt.DateFormat.ISODate)
+                if not parsed_dt.isValid():
+                    parsed_dt = QDateTime.fromString(self.task['due_date'], "yyyy-MM-dd HH:mm")
+                if parsed_dt.isValid():
+                    dt = parsed_dt
             except:
-                self.due_date.setDateTime(QDateTime.currentDateTime())
-        else:
-            self.due_date.setDateTime(QDateTime.currentDateTime())
-        self.due_date.setDisplayFormat("yyyy-MM-dd HH:mm")
+                pass
+                
+        self.due_date.setDate(dt.date())
+        self.due_date.setDisplayFormat("MMMM d, yyyy")
         self.due_date.setCalendarPopup(True)
-        layout.addWidget(self.due_date)
+        
+        # Override Qt Native Weekend red text
+        from PyQt6.QtGui import QTextCharFormat, QPixmap, QIcon
+        fmt = QTextCharFormat()
+        fmt.setForeground(QColor("#a6adc8"))
+        cal = self.due_date.calendarWidget()
+        cal.setWeekdayTextFormat(Qt.DayOfWeek.Saturday, fmt)
+        cal.setWeekdayTextFormat(Qt.DayOfWeek.Sunday, fmt)
+
+        # Force-set purple arrows on the calendar nav buttons via QIcon (QSS image: broken on Windows)
+        import os as _os
+        _icons_dir = _os.path.join(_os.path.dirname(__file__), "icons")
+        _prev_btn = cal.findChild(QWidget, "qt_calendar_prevmonth")
+        _next_btn = cal.findChild(QWidget, "qt_calendar_nextmonth")
+        if _prev_btn:
+            _prev_btn.setIcon(QIcon(QPixmap(_os.path.join(_icons_dir, "arrow_left.xpm"))))
+            _prev_btn.setIconSize(_prev_btn.size())
+        if _next_btn:
+            _next_btn.setIcon(QIcon(QPixmap(_os.path.join(_icons_dir, "arrow_right.xpm"))))
+            _next_btn.setIconSize(_next_btn.size())
+
+        self.due_time_btn = QPushButton()
+        self.due_time_btn.setFixedHeight(36)
+        self.due_time_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.due_time_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #181825; color: #cdd6f4; border: 1px solid #313244;
+                border-radius: 8px; padding: 0 16px; text-align: left; font-size: 13px; font-weight: bold;
+            }
+            QPushButton:hover, QPushButton:focus { border: 1px solid #cba6f7; }
+        """)
+        self.due_time_btn.clicked.connect(self.open_time_picker)
+        
+        time_str = dt.time().toString("HH:mm")
+        self.selected_time = dt.time()
+        self.due_time_btn.setText(time_str)
+
+        datetime_row.addWidget(self.due_date, 3)
+        datetime_row.addWidget(self.due_time_btn, 2)
+        layout.addLayout(datetime_row)
 
         # Priority + Status row
         row = QHBoxLayout()
@@ -107,17 +153,23 @@ class TaskDialog(QDialog):
         cancel.setFixedHeight(40)
         cancel.setStyleSheet("""
             QPushButton { background-color: #313244; color: #cdd6f4; border: none;
-                          border-radius: 8px; padding: 0 24px; font-size: 12px; }
+                          border-radius: 8px; padding: 0 24px; font-size: 13px; }
             QPushButton:hover { background-color: #45475a; }
         """)
         cancel.clicked.connect(self.reject)
 
-        save = QPushButton("💾  Save Task")
+        save = QPushButton("Save Task")
         save.setFixedHeight(40)
+        save.setCursor(Qt.CursorShape.PointingHandCursor)
         save.setStyleSheet("""
-            QPushButton { background-color: #cba6f7; color: #11111b; border: none;
-                          border-radius: 8px; padding: 0 24px; font-size: 12px; font-weight: bold; }
-            QPushButton:hover { background-color: #d4b6ff; }
+            QPushButton { 
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #cba6f7, stop:1 #89b4fa); 
+                color: #11111b; border: none; border-radius: 8px; 
+                padding: 0 24px; font-size: 13px; font-weight: bold; 
+            }
+            QPushButton:hover { 
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #d4b6ff, stop:1 #a0c4ff); 
+            }
         """)
         save.clicked.connect(self.save_task)
 
@@ -125,17 +177,35 @@ class TaskDialog(QDialog):
         btn_row.addWidget(save)
         layout.addLayout(btn_row)
 
+    def open_time_picker(self):
+        from tasksenseai.gui.custom_widgets import MaterialTimePicker
+        picker = MaterialTimePicker(self, self.selected_time)
+        if picker.exec() == QDialog.DialogCode.Accepted:
+            self.selected_time = picker.get_time()
+            self.due_time_btn.setText(self.selected_time.toString("HH:mm"))
+
     def save_task(self):
         title = self.title_input.text().strip()
         if not title:
-            QMessageBox.warning(self, "Error", "Task title is required!")
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Icon.Warning)
+            msg.setWindowTitle("Error")
+            msg.setText("Task title is required!")
+            msg.exec()
             return
+            
+        # Reconstruct standard ISO string from the separate Date and Time items
+        due_date_str = self.due_date.date().toString("yyyy-MM-dd")
+        due_time_str = self.selected_time.toString("HH:mm:00")
+        combined_iso = f"{due_date_str}T{due_time_str}"
+        
         self.result_data = {
             'title':       title,
             'description': self.desc_input.toPlainText().strip(),
-            'due_date':    self.due_date.dateTime().toString("yyyy-MM-ddTHH:mm:00"),
+            'due_date':    combined_iso,
             'priority':    self.priority.currentText(),
             'status':      self.status.currentText(),
+
         }
         self.accept()
 
@@ -158,11 +228,11 @@ class TasksPage(QWidget):
 
         # ── Header ──
         header = QHBoxLayout()
-        title = QLabel("📋  Task Manager")
+        title = QLabel("Task Manager")
         title.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
         title.setStyleSheet("color: #cdd6f4;")
 
-        add_btn = QPushButton("＋  New Task")
+        add_btn = QPushButton("+ New Task")
         add_btn.setFixedHeight(40)
         add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         add_btn.setStyleSheet("""
@@ -213,9 +283,9 @@ class TasksPage(QWidget):
 
         # ── Table ──
         self.table = QTableWidget()
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels(
-            ["ID", "Title", "Priority", "Due Date", "Status", "Risk", "Actions"]
+            ["ID", "Title", "Priority", "Due Date", "Status", "Risk", "Completed At", "Actions"]
         )
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.setAlternatingRowColors(True)
@@ -238,7 +308,11 @@ class TasksPage(QWidget):
             self.load_tasks()
             if self.refresh_callback:
                 self.refresh_callback()
-            QMessageBox.information(self, "Success", "Task added successfully!")
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setWindowTitle("Success")
+            msg.setText("Task added successfully!")
+            msg.exec()
 
     def edit_task(self, task):
         from tasksenseai.modules.task_manager import update_task
@@ -252,10 +326,14 @@ class TasksPage(QWidget):
                 self.refresh_callback()
 
     def delete_task(self, task_id):
-        reply = QMessageBox.question(
-            self, 'Delete Task', 'Are you sure you want to delete this task?',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        if reply == QMessageBox.StandardButton.Yes:
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Question)
+        msg.setWindowTitle("Delete Task")
+        msg.setText("Are you sure you want to delete this task?")
+        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        # When using instantiated objects, PyQt preserves our QSS rather than falling back to native OS!
+        if msg.exec() == int(QMessageBox.StandardButton.Yes):
             delete_task(task_id)
             self.load_tasks()
             if self.refresh_callback:
@@ -284,8 +362,9 @@ class TasksPage(QWidget):
         STAT_CLR = {'Pending': '#f9e2af', 'Completed': '#a6e3a1', 'In Progress': '#89b4fa'}
 
         for row, task in enumerate(tasks):
-            # ID
-            id_item = QTableWidgetItem(str(task['id']))
+            # ID (Sequential Display)
+            id_item = QTableWidgetItem(str(row + 1))
+            id_item.setData(Qt.ItemDataRole.UserRole, task['id'])
             id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 0, id_item)
 
@@ -317,6 +396,18 @@ class TasksPage(QWidget):
             risk_item.setForeground(QColor(RISK_CLR.get(risk, '#585b70')))
             self.table.setItem(row, 5, risk_item)
 
+            # Completed At
+            completed_str = task.get('completed_at', '') or ''
+            if completed_str:
+                completed_str = completed_str.replace('T', ' ')[:16]
+            completed_item = QTableWidgetItem(completed_str or '—')
+            completed_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if not completed_str:
+                completed_item.setForeground(QColor('#585b70'))
+            else:
+                completed_item.setForeground(QColor('#a6e3a1'))
+            self.table.setItem(row, 6, completed_item)
+
             # Action buttons
             aw = QWidget()
             aw.setStyleSheet("background: transparent;")
@@ -343,7 +434,7 @@ class TasksPage(QWidget):
                 btn.clicked.connect(handler)
                 al.addWidget(btn)
 
-            self.table.setCellWidget(row, 6, aw)
+            self.table.setCellWidget(row, 7, aw)
 
             # Row highlight for overdue / soon
             if task.get('due_date') and stat != 'Completed':
@@ -366,8 +457,9 @@ class TasksPage(QWidget):
         self.table.setSortingEnabled(True)
         self.table.resizeColumnsToContents()
         self.table.setColumnWidth(0, 50)
-        self.table.setColumnWidth(1, 220)
-        self.table.setColumnWidth(6, 160)
+        self.table.setColumnWidth(1, 200)
+        self.table.setColumnWidth(6, 130)
+        self.table.setColumnWidth(7, 160)
 
     # ─── Mark Complete (with personality) ─────────────
     def mark_complete(self, task_id):
@@ -392,7 +484,8 @@ class TasksPage(QWidget):
         pred = get_prediction_for_task(task_id)
         risk = pred['risk_level'] if pred else 'Low'
 
-        log_behavior(task_id, delay, 0, 30)
+        ignored = task.get('reminders_sent', 0) or 0
+        log_behavior(task_id, delay, ignored, 30)
         update_task_status(task_id, 'Completed')
 
         messages = {
@@ -410,7 +503,11 @@ class TasksPage(QWidget):
         msg = messages.get((risk, time_status),
                            "🎉 Task Complete!\nEvery completed task is a step forward!")
 
-        QMessageBox.information(self, "Task Completed! 🎯", msg)
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Icon.Information)
+        msg_box.setWindowTitle("Task Completed! 🎯")
+        msg_box.setText(msg)
+        msg_box.exec()
         self.load_tasks()
         if self.refresh_callback:
             self.refresh_callback()

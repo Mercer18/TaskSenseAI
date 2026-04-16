@@ -109,15 +109,20 @@ class DashboardPage(QWidget):
         mid_row = QHBoxLayout()
         mid_row.setSpacing(16)
 
-        # Streak card
+        # Streak card (with glow like stat cards)
         streak_frame = QFrame()
         streak_frame.setStyleSheet("""
             QFrame {
                 background-color: #1e1e2e;
                 border-radius: 14px;
-                border: 1px solid #313244;
+                border-left: 4px solid #fab387;
             }
         """)
+        streak_glow = QGraphicsDropShadowEffect(streak_frame)
+        streak_glow.setBlurRadius(24)
+        streak_glow.setColor(QColor("#fab387"))
+        streak_glow.setOffset(0, 0)
+        streak_frame.setGraphicsEffect(streak_glow)
         streak_frame.setFixedHeight(90)
         sl = QHBoxLayout(streak_frame)
         sl.setContentsMargins(24, 16, 24, 16)
@@ -149,9 +154,14 @@ class DashboardPage(QWidget):
             QFrame {
                 background-color: #1e1e2e;
                 border-radius: 14px;
-                border: 1px solid #313244;
+                border-left: 4px solid #89b4fa;
             }
         """)
+        today_glow = QGraphicsDropShadowEffect(today_frame)
+        today_glow.setBlurRadius(24)
+        today_glow.setColor(QColor("#89b4fa"))
+        today_glow.setOffset(0, 0)
+        today_frame.setGraphicsEffect(today_glow)
         today_frame.setFixedHeight(90)
         tl = QVBoxLayout(today_frame)
         tl.setContentsMargins(24, 14, 24, 14)
@@ -276,10 +286,9 @@ class DashboardPage(QWidget):
 
         tasks = get_pending_tasks()
         risk_colors = {'Low': '#a6e3a1', 'Medium': '#f9e2af', 'High': '#f38ba8', 'N/A': '#585b70'}
-        risk_bg     = {'Low': '#1a2e24', 'Medium': '#2e281a', 'High': '#2e1a1a', 'N/A': '#1e1e2e'}
 
         if not tasks:
-            empty = QLabel("🎉 No pending tasks! You're all caught up.")
+            empty = QLabel("No pending tasks! You're all caught up.")
             empty.setStyleSheet("color: #a6e3a1; font-size: 13px; padding: 24px;")
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.tasks_layout.addWidget(empty)
@@ -292,9 +301,12 @@ class DashboardPage(QWidget):
             card = QFrame()
             card.setStyleSheet(f"""
                 QFrame {{
-                    background-color: {risk_bg.get(risk, '#1e1e2e')};
+                    background-color: #1e1e2e;
                     border-radius: 10px;
-                    border: 1px solid {risk_colors.get(risk, '#313244')};
+                    border-left: 3px solid {risk_colors.get(risk, '#313244')};
+                    border-top: 1px solid #313244;
+                    border-right: 1px solid #313244;
+                    border-bottom: 1px solid #313244;
                 }}
             """)
             cl = QHBoxLayout(card)
