@@ -7,6 +7,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 
+from tasksenseai.database.db_manager import get_setting, set_setting
+from tasksenseai.modules.startup_manager import set_autostart, is_autostart_enabled
+
 
 class RetrainThread(QThread):
     finished = pyqtSignal(object, float)
@@ -143,6 +146,32 @@ class SettingsPage(QWidget):
         dl.addWidget(self.retrain_btn)
 
         layout.addWidget(dcard)
+
+        # ── Startup Settings ──
+        scard, sl = self._make_card("🚀  Startup Settings")
+        
+        s_desc = QLabel("Automatically launch TaskSenseAI when you turn on your computer. "
+                       "The app will start minimized in the system tray.")
+        s_desc.setWordWrap(True)
+        s_desc.setStyleSheet("color: #6c7086; font-size: 11px; background: transparent; border: none;")
+        sl.addWidget(s_desc)
+        
+        is_enabled = get_setting('auto_start', '0') == '1'
+        # Verification: sync setting with registry if they drift
+        reg_enabled = is_autostart_enabled()
+        if reg_enabled != is_enabled:
+            is_enabled = reg_enabled
+            set_setting('auto_start', '1' if reg_enabled else '0')
+
+        self.start_toggle = QPushButton("Disable Auto-start" if is_enabled else "Enable Auto-start")
+        self.start_toggle.setFixedHeight(38)
+        self.start_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.start_toggle.setStyleSheet(self._toggle_style(is_enabled))
+        self.start_toggle.clicked.connect(self.toggle_autostart)
+        sl.addWidget(self.start_toggle)
+        
+        layout.addWidget(scard)
+
         layout.addStretch()
 
         scroll.setWidget(scroll_widget)
@@ -181,3 +210,37 @@ class SettingsPage(QWidget):
         msg.setWindowTitle('Error')
         msg.setText(f'Failed to retrain model:\n{err}')
         msg.exec()
+
+    def _toggle_style(self, enabled):
+        if enabled:
+            return """
+                QPushButton { background-color: #a6e3a1; color: #11111b; border: none; border-radius: 8px; font-weight: bold; }
+                QPushButton:hover { background-color: #94e2d5; }
+            """
+        else:
+            return """
+                QPushButton { background-color: #313244; color: #cdd6f4; border: none; border-radius: 8px; }
+                QPushButton:hover { background-color: #45475a; }
+            """
+
+    def toggle_autostart(self):
+        current = get_setting('auto_start', '0') == '1'
+        new_state = not current
+        
+        if set_autostart(new_state):
+            set_setting('auto_start', '1' if new_state else '0')
+            self.start_toggle.setText("Disable Auto-start" if new_state else "Enable Auto-start")
+            self.start_toggle.setStyleSheet(self._toggle_style(new_state))
+            
+            status = "enabled" if new_state else "disabled"
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Icon.Information)
+            msg.setWindowTitle('Startup Updated')
+            msg.setText(f'Auto-start has been {status} successfully.')
+            msg.exec()
+        else:
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Icon.Critical)
+            msg.setWindowTitle('Error')
+            msg.setText('Failed to update registry settings. Please try running as Administrator.')
+            msg.exec()

@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit,
-    QTextEdit, QComboBox, QDateTimeEdit, QDateEdit, QTimeEdit, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMessageBox, QDialog, QFrame, QGraphicsDropShadowEffect
+    QTextEdit, QComboBox, QDateEdit, QTableWidget, QTableWidgetItem,
+    QHeaderView, QMessageBox, QDialog, QFrame, QGraphicsDropShadowEffect, QScrollArea
 )
-from PyQt6.QtCore import Qt, QDateTime
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtCore import Qt, QDateTime, QSize
+from PyQt6.QtGui import QFont, QColor, QIcon, QPixmap
 
 from tasksenseai.modules.task_manager import (
-    add_task, get_all_tasks, update_task_status, delete_task
+    add_task, get_all_tasks, update_task_status, delete_task, get_task_by_id, update_task
 )
-from tasksenseai.modules.ai_engine import predict_risk, save_prediction, get_prediction_for_task
+from tasksenseai.modules.ai_engine import get_prediction_for_task
 from tasksenseai.modules.behavior_tracker import log_behavior
 
 
@@ -29,6 +29,11 @@ class TaskDialog(QDialog):
         self.setStyleSheet("""
             QDialog { background-color: #1e1e2e; }
             QLabel  { color: #cdd6f4; font-size: 12px; background: transparent; border: none; }
+            QLineEdit, QTextEdit, QComboBox, QDateEdit {
+                background-color: #181825; color: #cdd6f4; border: 1px solid #313244;
+                border-radius: 8px; padding: 8px; font-size: 13px;
+            }
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus { border: 1px solid #cba6f7; }
         """)
         self.init_ui()
 
@@ -37,73 +42,41 @@ class TaskDialog(QDialog):
         layout.setSpacing(14)
         layout.setContentsMargins(24, 24, 24, 24)
 
-        # Title
         header_text = "Edit Task" if self.task else "Create New Task"
         header = QLabel(header_text)
         header.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
         header.setStyleSheet("color: #cba6f7; margin-bottom: 6px;")
         layout.addWidget(header)
 
-        # Task title
         layout.addWidget(QLabel("Task Title *"))
         self.title_input = QLineEdit()
         self.title_input.setPlaceholderText("What do you need to do?")
-        if self.task:
-            self.title_input.setText(self.task['title'])
+        if self.task: self.title_input.setText(self.task['title'])
         layout.addWidget(self.title_input)
 
-        # Description
         layout.addWidget(QLabel("Description"))
         self.desc_input = QTextEdit()
         self.desc_input.setPlaceholderText("Additional details (optional)...")
         self.desc_input.setMaximumHeight(80)
-        if self.task and self.task.get('description'):
-            self.desc_input.setText(self.task['description'])
+        if self.task and self.task.get('description'): self.desc_input.setText(self.task['description'])
         layout.addWidget(self.desc_input)
 
-        # Due date and Time (Split)
         layout.addWidget(QLabel("Due Date & Time"))
         datetime_row = QHBoxLayout()
         datetime_row.setSpacing(12)
 
         self.due_date = QDateEdit()
-        
-        # Determine initial values
         dt = QDateTime.currentDateTime()
         if self.task and self.task.get('due_date'):
             try:
                 parsed_dt = QDateTime.fromString(self.task['due_date'], Qt.DateFormat.ISODate)
-                if not parsed_dt.isValid():
-                    parsed_dt = QDateTime.fromString(self.task['due_date'], "yyyy-MM-dd HH:mm")
-                if parsed_dt.isValid():
-                    dt = parsed_dt
-            except:
-                pass
+                if parsed_dt.isValid(): dt = parsed_dt
+            except: pass
                 
         self.due_date.setDate(dt.date())
         self.due_date.setDisplayFormat("MMMM d, yyyy")
         self.due_date.setCalendarPopup(True)
         
-        # Override Qt Native Weekend red text
-        from PyQt6.QtGui import QTextCharFormat, QPixmap, QIcon
-        fmt = QTextCharFormat()
-        fmt.setForeground(QColor("#a6adc8"))
-        cal = self.due_date.calendarWidget()
-        cal.setWeekdayTextFormat(Qt.DayOfWeek.Saturday, fmt)
-        cal.setWeekdayTextFormat(Qt.DayOfWeek.Sunday, fmt)
-
-        # Force-set purple arrows on the calendar nav buttons via QIcon (QSS image: broken on Windows)
-        import os as _os
-        _icons_dir = _os.path.join(_os.path.dirname(__file__), "icons")
-        _prev_btn = cal.findChild(QWidget, "qt_calendar_prevmonth")
-        _next_btn = cal.findChild(QWidget, "qt_calendar_nextmonth")
-        if _prev_btn:
-            _prev_btn.setIcon(QIcon(QPixmap(_os.path.join(_icons_dir, "arrow_left.xpm"))))
-            _prev_btn.setIconSize(_prev_btn.size())
-        if _next_btn:
-            _next_btn.setIcon(QIcon(QPixmap(_os.path.join(_icons_dir, "arrow_right.xpm"))))
-            _next_btn.setIconSize(_next_btn.size())
-
         self.due_time_btn = QPushButton()
         self.due_time_btn.setFixedHeight(36)
         self.due_time_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -116,65 +89,36 @@ class TaskDialog(QDialog):
         """)
         self.due_time_btn.clicked.connect(self.open_time_picker)
         
-        time_str = dt.time().toString("HH:mm")
         self.selected_time = dt.time()
-        self.due_time_btn.setText(time_str)
+        self.due_time_btn.setText(self.selected_time.toString("HH:mm"))
 
         datetime_row.addWidget(self.due_date, 3)
         datetime_row.addWidget(self.due_time_btn, 2)
         layout.addLayout(datetime_row)
 
-        # Priority + Status row
         row = QHBoxLayout()
-
-        left = QVBoxLayout()
-        left.addWidget(QLabel("Priority"))
-        self.priority = QComboBox()
-        self.priority.addItems(["Low", "Medium", "High"])
+        left = QVBoxLayout(); left.addWidget(QLabel("Priority"))
+        self.priority = QComboBox(); self.priority.addItems(["Low", "Medium", "High"])
         self.priority.setCurrentText(self.task['priority'] if self.task else "Medium")
-        left.addWidget(self.priority)
-        row.addLayout(left)
+        left.addWidget(self.priority); row.addLayout(left)
 
-        right = QVBoxLayout()
-        right.addWidget(QLabel("Status"))
-        self.status = QComboBox()
-        self.status.addItems(["Pending", "In Progress", "Completed"])
+        right = QVBoxLayout(); right.addWidget(QLabel("Status"))
+        self.status = QComboBox(); self.status.addItems(["Pending", "In Progress", "Completed"])
         self.status.setCurrentText(self.task['status'] if self.task else "Pending")
-        right.addWidget(self.status)
-        row.addLayout(right)
-
+        right.addWidget(self.status); row.addLayout(right)
         layout.addLayout(row)
 
-        # Buttons
         btn_row = QHBoxLayout()
         btn_row.setSpacing(12)
-
-        cancel = QPushButton("Cancel")
-        cancel.setFixedHeight(40)
-        cancel.setStyleSheet("""
-            QPushButton { background-color: #313244; color: #cdd6f4; border: none;
-                          border-radius: 8px; padding: 0 24px; font-size: 13px; }
-            QPushButton:hover { background-color: #45475a; }
-        """)
+        cancel = QPushButton("Cancel"); cancel.setFixedHeight(40)
+        cancel.setStyleSheet("background-color: #313244; color: #cdd6f4; border-radius: 8px; border: none;")
         cancel.clicked.connect(self.reject)
 
-        save = QPushButton("Save Task")
-        save.setFixedHeight(40)
-        save.setCursor(Qt.CursorShape.PointingHandCursor)
-        save.setStyleSheet("""
-            QPushButton { 
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #cba6f7, stop:1 #89b4fa); 
-                color: #11111b; border: none; border-radius: 8px; 
-                padding: 0 24px; font-size: 13px; font-weight: bold; 
-            }
-            QPushButton:hover { 
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #d4b6ff, stop:1 #a0c4ff); 
-            }
-        """)
+        save = QPushButton("Save Task"); save.setFixedHeight(40)
+        save.setStyleSheet("background: #cba6f7; color: #11111b; border-radius: 8px; border: none; font-weight: bold;")
         save.clicked.connect(self.save_task)
 
-        btn_row.addWidget(cancel)
-        btn_row.addWidget(save)
+        btn_row.addWidget(cancel); btn_row.addWidget(save)
         layout.addLayout(btn_row)
 
     def open_time_picker(self):
@@ -186,28 +130,105 @@ class TaskDialog(QDialog):
 
     def save_task(self):
         title = self.title_input.text().strip()
-        if not title:
-            msg = QMessageBox(self)
-            msg.setIcon(QMessageBox.Icon.Warning)
-            msg.setWindowTitle("Error")
-            msg.setText("Task title is required!")
-            msg.exec()
-            return
-            
-        # Reconstruct standard ISO string from the separate Date and Time items
+        if not title: return
         due_date_str = self.due_date.date().toString("yyyy-MM-dd")
         due_time_str = self.selected_time.toString("HH:mm:00")
         combined_iso = f"{due_date_str}T{due_time_str}"
-        
         self.result_data = {
-            'title':       title,
-            'description': self.desc_input.toPlainText().strip(),
-            'due_date':    combined_iso,
-            'priority':    self.priority.currentText(),
-            'status':      self.status.currentText(),
-
+            'title': title, 'description': self.desc_input.toPlainText().strip(),
+            'due_date': combined_iso, 'priority': self.priority.currentText(), 'status': self.status.currentText()
         }
         self.accept()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  TASK CARD WIDGET
+# ═══════════════════════════════════════════════════════════════
+
+class ModernTaskCard(QFrame):
+    def __init__(self, task, on_complete, on_edit, on_delete):
+        super().__init__()
+        self.task = task
+        self.on_complete = on_complete
+        self.on_edit = on_edit
+        self.on_delete = on_delete
+        
+        pred = get_prediction_for_task(task['id'])
+        risk = pred['risk_level'] if pred else 'N/A'
+        
+        risk_colors = {'Low': '#a6e3a1', 'Medium': '#f9e2af', 'High': '#f38ba8', 'N/A': '#585b70'}
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: #1e1e2e;
+                border-radius: 12px;
+                border-left: 4px solid {risk_colors.get(risk, '#313244')};
+            }}
+            QLabel {{ background: transparent; border: none; }}
+        """)
+        self.setFixedHeight(85)
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 0, 20, 0)
+        
+        # Title & Info
+        info = QVBoxLayout()
+        info.setSpacing(2)
+        info.addStretch()
+        
+        title = QLabel(task['title'])
+        title.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        title.setStyleSheet("color: #cdd6f4;")
+        info.addWidget(title)
+        
+        meta = QHBoxLayout()
+        meta.setSpacing(12)
+        
+        prio_clr = {'Low': '#a6e3a1', 'Medium': '#f9e2af', 'High': '#f38ba8'}.get(task['priority'], '#6c7086')
+        prio = QLabel(f"● {task['priority']}")
+        prio.setStyleSheet(f"color: {prio_clr}; font-size: 11px;")
+        
+        due_str = (task.get('due_date') or '').replace('T', ' ')[:16] or 'No date'
+        due = QLabel(f"📅 {due_str}")
+        due.setStyleSheet("color: #6c7086; font-size: 11px;")
+        
+        risk_lbl = QLabel(f"🤖 Risk: {risk}")
+        risk_lbl.setStyleSheet(f"color: {risk_colors.get(risk, '#585b70')}; font-size: 11px; font-weight: bold;")
+        
+        meta.addWidget(prio); meta.addWidget(due); meta.addWidget(risk_lbl); meta.addStretch()
+        info.addLayout(meta)
+        info.addStretch()
+        layout.addLayout(info, 1)
+        
+        # Actions
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        
+        if task['status'] != 'Completed':
+            done = QPushButton("✅")
+            done.setFixedSize(36, 36)
+            done.setToolTip("Complete")
+            done.setCursor(Qt.CursorShape.PointingHandCursor)
+            done.setStyleSheet("background: #2a3a2e; border-radius: 18px; border: none;")
+            done.clicked.connect(lambda: on_complete(task['id']))
+            actions.addWidget(done)
+            
+        edit = QPushButton("✏️")
+        edit.setFixedSize(36, 36)
+        edit.setToolTip("Edit")
+        edit.setCursor(Qt.CursorShape.PointingHandCursor)
+        edit.setStyleSheet("background: #2e2a1e; border-radius: 18px; border: none;")
+        edit.clicked.connect(lambda: on_edit(task))
+        actions.addWidget(edit)
+        
+        trash = QPushButton("🗑")
+        trash.setFixedSize(36, 36)
+        trash.setToolTip("Delete")
+        trash.setCursor(Qt.CursorShape.PointingHandCursor)
+        trash.setStyleSheet("background: #2e1a1e; border-radius: 18px; border: none;")
+        trash.clicked.connect(lambda: on_delete(task['id']))
+        actions.addWidget(trash)
+        
+        layout.addLayout(actions)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -226,288 +247,212 @@ class TasksPage(QWidget):
         layout.setContentsMargins(30, 28, 30, 20)
         layout.setSpacing(16)
 
-        # ── Header ──
         header = QHBoxLayout()
         title = QLabel("Task Manager")
         title.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
         title.setStyleSheet("color: #cdd6f4;")
 
         add_btn = QPushButton("+ New Task")
-        add_btn.setFixedHeight(40)
+        add_btn.setFixedSize(140, 42)
         add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         add_btn.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 #cba6f7, stop:1 #89b4fa);
-                color: #11111b; border: none; border-radius: 10px;
-                padding: 0 24px; font-size: 12px; font-weight: bold;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 #d4b6ff, stop:1 #a0c4ff);
-            }
+            QPushButton { background: #cba6f7; color: #11111b; border-radius: 10px; font-weight: bold; }
+            QPushButton:hover { background: #d4b6ff; }
         """)
         add_btn.clicked.connect(self.open_add_task)
 
-        header.addWidget(title)
-        header.addStretch()
-        header.addWidget(add_btn)
+        header.addWidget(title); header.addStretch(); header.addWidget(add_btn)
         layout.addLayout(header)
 
-        # ── Filter bar ──
+        # Filters
         filter_bar = QHBoxLayout()
-        filter_bar.setSpacing(12)
-
-        search_icon = QLabel("🔍")
-        search_icon.setStyleSheet("color: #585b70; font-size: 14px;")
-        filter_bar.addWidget(search_icon)
-
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search tasks...")
-        self.search_input.setFixedHeight(36)
+        self.search_input.setPlaceholderText("Find a task...")
+        self.search_input.setFixedHeight(38)
         self.search_input.textChanged.connect(self.load_tasks)
         filter_bar.addWidget(self.search_input, 3)
 
         self.filter_combo = QComboBox()
-        self.filter_combo.addItems(["All Tasks", "Pending", "In Progress", "Completed"])
-        self.filter_combo.setFixedHeight(36)
+        self.filter_combo.addItems(["All Focus", "Pending Only", "Completed"])
+        self.filter_combo.setFixedHeight(38)
         self.filter_combo.currentTextChanged.connect(self.load_tasks)
         filter_bar.addWidget(self.filter_combo, 1)
-
         layout.addLayout(filter_bar)
 
-        # ── Task count ──
-        self.count_label = QLabel("")
-        self.count_label.setStyleSheet("color: #585b70; font-size: 11px;")
-        layout.addWidget(self.count_label)
-
-        # ── Table ──
-        self.table = QTableWidget()
-        self.table.setColumnCount(8)
-        self.table.setHorizontalHeaderLabels(
-            ["ID", "Title", "Priority", "Due Date", "Status", "Risk", "Completed At", "Actions"]
-        )
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.setAlternatingRowColors(True)
-        self.table.verticalHeader().setVisible(False)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSortingEnabled(True)
-        self.table.setShowGrid(False)
-        self.table.verticalHeader().setDefaultSectionSize(48)
-        layout.addWidget(self.table)
+        # Scoped Sections
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self.scroll_content = QWidget()
+        self.scroll_content.setStyleSheet("background: transparent;")
+        self.list_layout = QVBoxLayout(self.scroll_content)
+        self.list_layout.setSpacing(25)
+        self.list_layout.setContentsMargins(0, 10, 10, 10)
+        scroll.setWidget(self.scroll_content)
+        layout.addWidget(scroll)
 
         self.load_tasks()
 
-    # ─── CRUD ─────────────────────────────────────────
+    def _add_section(self, title, tasks):
+        if not tasks: return
+        
+        container = QVBoxLayout()
+        header = QLabel(title)
+        header.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        header.setStyleSheet("color: #6c7086; margin-bottom: 5px;")
+        container.addWidget(header)
+        
+        for t in tasks:
+            card = ModernTaskCard(t, self.mark_complete, self.edit_task, self.delete_task)
+            container.addWidget(card)
+        
+        self.list_layout.addLayout(container)
+
+    def load_tasks(self):
+        # Clear current list
+        while self.list_layout.count():
+            item = self.list_layout.takeAt(0)
+            if item.layout():
+                # Correctly clear nested layouts
+                while item.layout().count():
+                    si = item.layout().takeAt(0)
+                    if si.widget(): si.widget().deleteLater()
+            elif item.widget():
+                item.widget().deleteLater()
+
+        all_tasks = get_all_tasks()
+        search = self.search_input.text().strip().lower()
+        filt = self.filter_combo.currentText()
+        
+        # Master Filter
+        tasks = []
+        for t in all_tasks:
+            if search and search not in t['title'].lower(): continue
+            if filt == "Pending Only" and t['status'] == 'Completed': continue
+            if filt == "Completed" and t['status'] != 'Completed': continue
+            tasks.append(t)
+
+        # Partitioning
+        today = datetime.now().date()
+        backlog = []
+        today_tasks = []
+        upcoming = []
+        completed = []
+        
+        for t in tasks:
+            if t['status'] == 'Completed':
+                completed.append(t)
+                continue
+            
+            if not t.get('due_date'):
+                today_tasks.append(t)
+                continue
+                
+            try:
+                due = datetime.fromisoformat(t['due_date']).date()
+                if due < today:
+                    backlog.append(t)
+                elif due == today:
+                    today_tasks.append(t)
+                else:
+                    upcoming.append(t)
+            except:
+                today_tasks.append(t)
+
+        # Render sections
+        self._add_section("🕒 From Yesterday (Backlog)", backlog)
+        self._add_section("📅 Today's Focus", today_tasks)
+        self._add_section("🚀 Upcoming", upcoming)
+        self._add_section("✅ Recently Completed", completed[:10]) # Limiting completed for speed
+
+        if not tasks:
+            empty = QLabel("No tasks found. Time to relax! 🍹")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty.setStyleSheet("color: #585b70; font-size: 14px; margin-top: 50px;")
+            self.list_layout.addWidget(empty)
+
+        self.list_layout.addStretch()
+
     def open_add_task(self):
         dlg = TaskDialog(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             d = dlg.result_data
             add_task(d['title'], d['description'], d['due_date'], d['priority'])
             self.load_tasks()
-            if self.refresh_callback:
-                self.refresh_callback()
-            msg = QMessageBox(self)
-            msg.setIcon(QMessageBox.Icon.Information)
-            msg.setWindowTitle("Success")
-            msg.setText("Task added successfully!")
-            msg.exec()
+            if self.refresh_callback: self.refresh_callback()
 
     def edit_task(self, task):
-        from tasksenseai.modules.task_manager import update_task
         dlg = TaskDialog(self, task=task)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             d = dlg.result_data
-            update_task(task['id'], d['title'], d['description'],
-                        d['due_date'], d['priority'], d['status'])
+            update_task(task['id'], d['title'], d['description'], d['due_date'], d['priority'], d['status'])
             self.load_tasks()
-            if self.refresh_callback:
-                self.refresh_callback()
+            if self.refresh_callback: self.refresh_callback()
 
     def delete_task(self, task_id):
         msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Question)
         msg.setWindowTitle("Delete Task")
         msg.setText("Are you sure you want to delete this task?")
         msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        
-        # When using instantiated objects, PyQt preserves our QSS rather than falling back to native OS!
         if msg.exec() == int(QMessageBox.StandardButton.Yes):
             delete_task(task_id)
             self.load_tasks()
-            if self.refresh_callback:
-                self.refresh_callback()
+            if self.refresh_callback: self.refresh_callback()
 
-    # ─── Table loader ─────────────────────────────────
-    def load_tasks(self):
-        filt = self.filter_combo.currentText() if hasattr(self, 'filter_combo') else "All Tasks"
-        search = self.search_input.text().strip().lower() if hasattr(self, 'search_input') else ""
-
-        tasks = get_all_tasks()
-        if filt != "All Tasks":
-            tasks = [t for t in tasks if t['status'] == filt]
-        if search:
-            tasks = [t for t in tasks
-                     if search in t['title'].lower()
-                     or search in (t.get('description') or '').lower()]
-
-        self.count_label.setText(f"Showing {len(tasks)} task{'s' if len(tasks) != 1 else ''}")
-
-        self.table.setSortingEnabled(False)
-        self.table.setRowCount(len(tasks))
-
-        RISK_CLR = {'Low': '#a6e3a1', 'Medium': '#f9e2af', 'High': '#f38ba8'}
-        PRIO_CLR = {'Low': '#a6e3a1', 'Medium': '#f9e2af', 'High': '#f38ba8'}
-        STAT_CLR = {'Pending': '#f9e2af', 'Completed': '#a6e3a1', 'In Progress': '#89b4fa'}
-
-        for row, task in enumerate(tasks):
-            # ID (Sequential Display)
-            id_item = QTableWidgetItem(str(row + 1))
-            id_item.setData(Qt.ItemDataRole.UserRole, task['id'])
-            id_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 0, id_item)
-
-            # Title
-            self.table.setItem(row, 1, QTableWidgetItem(task['title']))
-
-            # Priority  (with dot indicator)
-            pri = task['priority']
-            pri_item = QTableWidgetItem(f"● {pri}")
-            pri_item.setForeground(QColor(PRIO_CLR.get(pri, '#cdd6f4')))
-            self.table.setItem(row, 2, pri_item)
-
-            # Due date
-            due_str = task.get('due_date', '') or ''
-            if due_str:
-                due_str = due_str.replace("T", " ")[:16]
-            self.table.setItem(row, 3, QTableWidgetItem(due_str or 'No date'))
-
-            # Status  (with colour)
-            stat = task['status']
-            stat_item = QTableWidgetItem(stat)
-            stat_item.setForeground(QColor(STAT_CLR.get(stat, '#cdd6f4')))
-            self.table.setItem(row, 4, stat_item)
-
-            # Risk
-            pred = get_prediction_for_task(task['id'])
-            risk = pred['risk_level'] if pred else 'N/A'
-            risk_item = QTableWidgetItem(risk)
-            risk_item.setForeground(QColor(RISK_CLR.get(risk, '#585b70')))
-            self.table.setItem(row, 5, risk_item)
-
-            # Completed At
-            completed_str = task.get('completed_at', '') or ''
-            if completed_str:
-                completed_str = completed_str.replace('T', ' ')[:16]
-            completed_item = QTableWidgetItem(completed_str or '—')
-            completed_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            if not completed_str:
-                completed_item.setForeground(QColor('#585b70'))
-            else:
-                completed_item.setForeground(QColor('#a6e3a1'))
-            self.table.setItem(row, 6, completed_item)
-
-            # Action buttons
-            aw = QWidget()
-            aw.setStyleSheet("background: transparent;")
-            al = QHBoxLayout(aw)
-            al.setContentsMargins(6, 4, 6, 4)
-            al.setSpacing(8)
-
-            for icon, tip, style, handler in [
-                ("✅", "Complete", "background:#2a3a2e; color:#a6e3a1;",
-                 lambda _, tid=task['id']: self.mark_complete(tid)),
-                ("✏️", "Edit",     "background:#2e2a1e; color:#f9e2af;",
-                 lambda _, t=task: self.edit_task(t)),
-                ("🗑", "Delete",   "background:#2e1a1e; color:#f38ba8;",
-                 lambda _, tid=task['id']: self.delete_task(tid)),
-            ]:
-                btn = QPushButton(icon)
-                btn.setFixedSize(38, 32)
-                btn.setToolTip(tip)
-                btn.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn.setStyleSheet(f"""
-                    QPushButton {{ {style} border-radius: 8px; font-size: 14px; border: none; }}
-                    QPushButton:hover {{ border: 1px solid #585b70; }}
-                """)
-                btn.clicked.connect(handler)
-                al.addWidget(btn)
-
-            self.table.setCellWidget(row, 7, aw)
-
-            # Row highlight for overdue / soon
-            if task.get('due_date') and stat != 'Completed':
-                try:
-                    due = datetime.fromisoformat(task['due_date'])
-                    diff = (due - datetime.now()).total_seconds() / 60
-                    bg = None
-                    if diff < 0:
-                        bg = QColor('#2e1a1a')
-                    elif diff < 120:
-                        bg = QColor('#2e281a')
-                    if bg:
-                        for c in range(6):
-                            it = self.table.item(row, c)
-                            if it:
-                                it.setBackground(bg)
-                except:
-                    pass
-
-        self.table.setSortingEnabled(True)
-        self.table.resizeColumnsToContents()
-        self.table.setColumnWidth(0, 50)
-        self.table.setColumnWidth(1, 200)
-        self.table.setColumnWidth(6, 130)
-        self.table.setColumnWidth(7, 160)
-
-    # ─── Mark Complete (with personality) ─────────────
     def mark_complete(self, task_id):
-        from tasksenseai.modules.task_manager import get_task_by_id
-
         task = get_task_by_id(task_id)
-        delay = 0
-        time_status = 'on_time'
+        if not task: return
 
-        if task and task.get('due_date'):
+        now = datetime.now()
+        
+        # 1. Calculate metrics for performance logging
+        delay_min = 0
+        if task.get('due_date'):
             try:
-                due = datetime.fromisoformat(task['due_date'])
-                diff = (datetime.now() - due).total_seconds() / 60
-                if diff > 5:
-                    time_status = 'late'
-                    delay = int(diff)
-                elif diff < -30:
-                    time_status = 'early'
-            except:
-                pass
+                due_dt = datetime.fromisoformat(task['due_date'])
+                diff = (now - due_dt).total_seconds() / 60
+                delay_min = int(max(0, diff))
+            except: pass
+            
+        try:
+            created_dt = datetime.fromisoformat(task['created_at'])
+            complete_min = int((now - created_dt).total_seconds() / 60)
+        except:
+            complete_min = 0
+        
+        ignored = task.get('reminders_sent', 0)
 
-        pred = get_prediction_for_task(task_id)
-        risk = pred['risk_level'] if pred else 'Low'
+        # 2. Log behavior for AI training
+        log_behavior(task_id, delay_min, ignored, complete_min)
 
-        ignored = task.get('reminders_sent', 0) or 0
-        log_behavior(task_id, delay, ignored, 30)
+        # 3. Perform update
         update_task_status(task_id, 'Completed')
-
-        messages = {
-            ('High', 'early'):   "🤯 WAIT — You finished EARLY on a HIGH RISK task?!\nLEGENDARY move! Nobody saw this coming!",
-            ('High', 'on_time'): "🔥 You actually did it ON TIME?!\nWe didn't see that coming — but WE LOVE IT!",
-            ('High', 'late'):    "😮‍💨 FINALLY! Better late than never!\nThe procrastination monster lost today.",
-            ('Medium', 'early'): "⚡ Ahead of schedule? That's growth!\nYou're leveling up, keep it going!",
-            ('Medium', 'on_time'): "💪 Solid work! Right on schedule.\nConsistency is what separates winners from wishers.",
-            ('Medium', 'late'):  "😤 Cutting it close, weren't you?\nYou got there though. Next time, less suspense!",
-            ('Low', 'early'):    "🏆 Look at you being productive!\nYour future self just did a happy dance.",
-            ('Low', 'on_time'):  "✅ Clean execution. Task done, no drama.\nThis is how it's supposed to go!",
-            ('Low', 'late'):     "🙄 Really? Even a low-risk task got delayed?\nBut hey — you still finished it. Tomorrow we do better!",
-        }
-
-        msg = messages.get((risk, time_status),
-                           "🎉 Task Complete!\nEvery completed task is a step forward!")
-
-        msg_box = QMessageBox(self)
-        msg_box.setIcon(QMessageBox.Icon.Information)
-        msg_box.setWindowTitle("Task Completed! 🎯")
-        msg_box.setText(msg)
-        msg_box.exec()
         self.load_tasks()
-        if self.refresh_callback:
-            self.refresh_callback()
+        if self.refresh_callback: self.refresh_callback()
+
+        # 4. Show Feedback Message
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle("Task Completed! 🎉")
+        
+        if task.get('due_date'):
+            try:
+                due_dt = datetime.fromisoformat(task['due_date'])
+                if now < due_dt:
+                    saved = (due_dt - now).total_seconds() / 60
+                    time_str = self._fmt_time(saved)
+                    msg.setText(f"Great job! You finished '{task['title']}' {time_str} early! 🚀")
+                else:
+                    msg.setText(f"Success! Task '{task['title']}' is done. Better late than never! 💪")
+            except:
+                msg.setText(f"Success! Task '{task['title']}' has been moved to the Vault. ✅")
+        else:
+            msg.setText(f"Excellent! Task '{task['title']}' has been moved to the Vault. ✅")
+            
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
+
+    def _fmt_time(self, m):
+        if m < 60: return f"{int(m)}m"
+        if m < 1440: return f"{m/60:.1f}h"
+        return f"{m/1440:.1f}d"

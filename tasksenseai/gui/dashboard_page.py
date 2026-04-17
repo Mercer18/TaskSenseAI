@@ -218,23 +218,44 @@ class DashboardPage(QWidget):
             return "0%"
         return f"{int(stats['completed']/stats['total']*100)}%"
 
-    @staticmethod
-    def _build_greeting():
+    def _build_greeting(self):
+        tasks = get_all_tasks()
+        today = datetime.now().date()
+        backlog_count = 0
+        for t in tasks:
+            if t['status'] != 'Completed':
+                if t.get('due_date'):
+                    try:
+                        due = datetime.fromisoformat(t['due_date']).date()
+                        if due < today:
+                            backlog_count += 1
+                    except:
+                        pass
+        
         hour = datetime.now().hour
-        if hour < 12:
-            text = "Good morning! Let's get productive today. ☀️"
-        elif hour < 17:
-            text = "Good afternoon! Keep the momentum going. 🚀"
-        elif hour < 21:
-            text = "Good evening! Wrap up your tasks strong. 🌙"
+        if backlog_count > 0:
+            if hour >= 21 or hour < 5:
+                text = f"Still got {backlog_count} task{'s' if backlog_count > 1 else ''} from earlier. Want to clear them before bed? 🌙"
+            else:
+                text = f"Don't forget — you have {backlog_count} backlog task{'s' if backlog_count > 1 else ''} to clear! ⚒️"
         else:
-            text = "Burning the midnight oil? You got this. 🌌"
+            if hour < 12:
+                text = "Good morning! Ready for a fresh start? What's on your mind? ☀️"
+            elif hour < 17:
+                text = "Good afternoon! Momentum is key. What's next on the list? 🚀"
+            elif hour < 21:
+                text = "Good evening! Wrapping things up? Anything else for today? 🌙"
+            else:
+                text = "Late night productivity? You're a machine! Planning for tomorrow? 🌌"
+
         lbl = QLabel(text)
-        lbl.setStyleSheet("color: #6c7086; font-size: 12px;")
+        lbl.setStyleSheet("color: #6c7086; font-size: 13px; font-weight: 500;")
         return lbl
 
     def _calc_streak(self):
-        """Calculate consecutive days with at least one task completed."""
+        """Calculate consecutive days with at least one task completed.
+        Holds the streak if yesterday was completed but today hasn't been yet.
+        """
         tasks = get_all_tasks()
         completed_dates = set()
         for t in tasks:
@@ -246,10 +267,23 @@ class DashboardPage(QWidget):
                     pass
 
         streak = 0
-        day = datetime.now().date()
-        while day in completed_dates:
+        today = datetime.now().date()
+        
+        # If today hasn't been completed, we check if we have a streak ending yesterday.
+        # This prevents the streak from dropping to 0 every morning.
+        curr_day = today
+        if curr_day not in completed_dates:
+            yesterday = today - timedelta(days=1)
+            if yesterday in completed_dates:
+                curr_day = yesterday
+            else:
+                return 0 # No completion today OR yesterday -> Streak reset
+
+        # Count backwards
+        while curr_day in completed_dates:
             streak += 1
-            day -= timedelta(days=1)
+            curr_day -= timedelta(days=1)
+            
         return streak
 
     def _today_progress(self):

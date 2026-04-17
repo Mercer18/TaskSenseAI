@@ -88,6 +88,8 @@ def initialize_database():
     
     # Initialize default settings
     cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('check_interval', '5')")
+    cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('last_run_date', ?)", (datetime.now().date().isoformat(),))
+    cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('auto_start', '0')")
 
     conn.commit()
     conn.close()

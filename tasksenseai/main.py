@@ -10,12 +10,14 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QSize
 from PyQt6.QtGui import QFont, QIcon, QColor, QPixmap, QPainter, QLinearGradient, QAction
 
-from tasksenseai.database.db_manager import initialize_database
+from tasksenseai.database.db_manager import initialize_database, set_setting, get_setting
 from tasksenseai.modules.ai_engine import ensure_model_exists
+from tasksenseai.modules.task_manager import get_all_tasks
 from tasksenseai.modules.reminder_system import start_reminder_daemon
 from tasksenseai.gui.styles import GLOBAL_STYLESHEET
 from tasksenseai.gui.dashboard_page import DashboardPage
 from tasksenseai.gui.tasks_page import TasksPage
+from tasksenseai.gui.all_tasks_page import AllTasksPage
 from tasksenseai.gui.ai_insights_page import AIInsightsPage
 from tasksenseai.gui.analytics_page import AnalyticsPage
 from tasksenseai.gui.settings_page import SettingsPage
@@ -167,9 +169,10 @@ class MainWindow(QMainWindow):
         nav_items = [
             ("Dashboard", "🏠", 0),
             ("Tasks",     "📋", 1),
-            ("AI Insights","🤖", 2),
-            ("Analytics", "📊", 3),
-            ("Settings",  "⚙️", 4),
+            ("Task Vault", "📑", 2),
+            ("AI Insights","🤖", 3),
+            ("Analytics", "📊", 4),
+            ("Settings",  "⚙️", 5),
         ]
 
         for label, icon, index in nav_items:
@@ -199,12 +202,14 @@ class MainWindow(QMainWindow):
 
         self.dashboard_page = DashboardPage()
         self.tasks_page = TasksPage(refresh_callback=self.refresh_all)
+        self.all_tasks_page = AllTasksPage()
         self.ai_insights_page = AIInsightsPage()
         self.analytics_page = AnalyticsPage()
         self.settings_page = SettingsPage()
 
         self.stack.addWidget(self.dashboard_page)
         self.stack.addWidget(self.tasks_page)
+        self.stack.addWidget(self.all_tasks_page)
         self.stack.addWidget(self.ai_insights_page)
         self.stack.addWidget(self.analytics_page)
         self.stack.addWidget(self.settings_page)
@@ -250,11 +255,38 @@ class MainWindow(QMainWindow):
         """Minimize to tray instead of quitting."""
         event.ignore()
         self.hide()
+        
+        # Determine personality message based on today's progress
+        tasks = get_all_tasks()
+        today = datetime.now().date()
+        done_today = 0
+        for t in tasks:
+            if t.get('completed_at') and t.get('status') == 'Completed':
+                try:
+                    cd = datetime.fromisoformat(t['completed_at']).date()
+                    if cd == today:
+                        done_today += 1
+                except: pass
+
+        hour = datetime.now().hour
+        if hour >= 21 or hour < 5:
+            title = "Good night! 🌙"
+            if done_today > 0:
+                msg = f"Good work on the {done_today} task{'s' if done_today > 1 else ''} today! Rest up — see you tomorrow with more energy! 🌌"
+            else:
+                msg = "Rest up! Tomorrow is a new day to crush those tasks. See you then! 💤"
+        elif hour < 12:
+            title = "Stay focused! ☀️"
+            msg = "TaskSenseAI is still tracking in the background. Keep that morning momentum! 🚀"
+        else:
+            title = "Background Mode 📋"
+            msg = "I'm still here if you need me. TaskSenseAI is guarding your productivity! 🛡️"
+
         self.tray_icon.showMessage(
-            "TaskSenseAI",
-            "Running in background. Double-click tray icon to restore.",
+            title,
+            msg,
             QSystemTrayIcon.MessageIcon.Information,
-            2000
+            3000
         )
 
     # ─── Page switching ────────────────────────────────────────
@@ -266,26 +298,32 @@ class MainWindow(QMainWindow):
         elif index == 1:
             self.tasks_page.load_tasks()
         elif index == 2:
-            self.ai_insights_page.load_insights()
+            self.all_tasks_page.load_tasks()
         elif index == 3:
+            self.ai_insights_page.load_insights()
+        elif index == 4:
             from tasksenseai.gui.analytics_page import AnalyticsPage as AP
-            old = self.stack.widget(3)
+            old = self.stack.widget(4)
             self.analytics_page = AP()
             self.stack.removeWidget(old)
             old.deleteLater()
-            self.stack.insertWidget(3, self.analytics_page)
-            self.stack.setCurrentIndex(3)
+            self.stack.insertWidget(4, self.analytics_page)
+            self.stack.setCurrentIndex(4)
 
         for i, btn in enumerate(self.nav_buttons):
             btn.set_active(i == index)
 
     def refresh_all(self):
         self.dashboard_page.refresh()
+        self.all_tasks_page.load_tasks()
 
 
 def main():
     initialize_database()
     ensure_model_exists()
+    
+    # Track day transitions
+    set_setting('last_run_date', datetime.now().date().isoformat())
 
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
@@ -294,7 +332,14 @@ def main():
     start_reminder_daemon()
 
     window = MainWindow()
-    window.show()
+    
+    # Optimized for user resolution (1920x1200) and adaptable to others
+    if "--minimized" not in sys.argv:
+        window.showMaximized()
+    else:
+        # Just ensure it exists in the background (tray is already setup in MainWindow.__init__)
+        pass
+
     sys.exit(app.exec())
 
 
